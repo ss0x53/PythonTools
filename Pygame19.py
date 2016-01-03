@@ -1,6 +1,6 @@
 SCREEN_SIZE  = (640,480)
 NEST_POSITION = (320,240)
-ANT_COUNT = 20
+ANT_COUNT = 200
 NEST_SIZE = 100.
 SCREEN_BG_COLOR = (255,255,255)
 
@@ -101,10 +101,12 @@ class GameEntity(object):
 	def process(self,time_passed):
 		self.brain.think()
 		if self.speed > 0. and self.location != self.destination:
-			vec_to_destination = vec_to_destination.get_length()
+			vec_to_destination = self.destination - self.location
+			distance_to_destination = vec_to_destination.get_length()
 			heading = vec_to_destination.get_normalized()
-			travel_distance = min(distance_to_destination,time_passed * self.speed)
+			travel_distance = min(distance_to_destination, time_passed * self.speed)
 			self.location += travel_distance * heading
+
 
 class Leaf(GameEntity):
 	def __init__(self,world,image):
@@ -170,6 +172,36 @@ class Ant(GameEntity):
 			w,h = self.carry_image.get_size()
 			surface.blit(self.carry_iamge,(x - w,y - h / 2))
 
+class AntStateExploring(State):
+	def __init__(self,ant):
+		State.__init__(self,"exploring")
+		self.ant = ant
+
+	def random_destination(self):
+		w, h = SCREEN_SIZE
+		self.ant.destination = Vector2(randint(0,w),randint(0,h))
+
+	def do_actions(self):
+		if randint(1, 20) == 1:
+			self.random_destination()
+
+	def check_conditions(self):
+		leaf = self.ant.world.get_close_entity("leaf",self.ant.location)
+		if leaf is not None:
+			self.ant.leaf_id = leaf.id
+			return "seeking"
+		spider = self.ant.world.get_close_entity("spider",NEST_POSITION,NEST_SIZE)
+		if spider is not None:
+			if self.ant.location.get_distance_to(spider.location) < 100.:
+				self.ant.spider_id = spider.id
+				return "hunting"
+		return None
+
+	def entry_actions(self):
+		self.ant.speed = 120. + randint(-30,30)
+		self.random_destination()
+
+
 class AntStateSeeking(State):
 	def __init__(self,ant):
 		State.__init__(self,"seeking")
@@ -192,4 +224,96 @@ class AntStateSeeking(State):
 			self.ant.destination = leaf.location
 			self.ant.speed = 160. + randint(-20,20)
 
+class AntStateDelivering(State):
+	def __init__(self,ant):
+		State.__init__(self,"delivering")
+		self.ant = ant
+
+	def check_conditions(self):
+		if Vector2(*NEST_POSITION).get_distance_to(self.ant.location) < NEST_SIZE:
+			if(randint(1,10) == 1):
+				self.ant.drop(self.ant.world.background)
+				return "exploring"
+		return None
+
+	def entry_actions(self):
+		self.ant.speed = 60.
+		random_offset = Vector2(randint(-20,20),randint(-20,20))
+		self.ant.destination = Vector2(*NEST_POSITION) + random_offset
+class AntStateHunting(State):
+	def __init__(self,ant):
+		State.__init__(self,"hunting")
+		self.ant = ant
+		self.got_kill = False
+
+	def do_actions(self):
+		spider = self.ant.world.get(self.ant.spider_id)
+		if spider is None:
+			return
+		self.ant.destination = spider.location
+		if self.ant.location.get_distance_to(spider.location) < 15.:
+			if randint(1,5) == 1:
+				spider.bitten()
+				if spider.health <= 0:
+					self.ant.carry(spider.image)
+					self.ant.world.remove_entity(spider)
+					self.got_kill = True
+
+	def check_conditions(self):
+		if self.got_kill:
+			return "delivering"
+		spider = self.ant.world.get(self.ant.spider_id)
+		if spider is None:
+			return "exploring"
+		if spider.location.get_distance_to(NEST_POSITION) > NEST_SIZE * 3:
+			return "exploring"
+		return None
+
+	def entry_actions(self):
+		self.speed = 160. + randint(0,50)
+
+	def exit_actions(self):
+		self.got_kill = False
+
+def run():
+	pygame.init()
+	screen = pygame.display.set_mode(SCREEN_SIZE,0,32)
+	world = World()
+	w,h = SCREEN_SIZE
+	clock = pygame.time.Clock()
+	ant_image = pygame.image.load("./Images/ant.png").convert_alpha()
+	leaf_image = pygame.image.load("./Images/leaf.png").convert_alpha()
+	spider_image = pygame.image.load("./Images/spider.png").convert_alpha()
+
+	for ant_no in xrange(ANT_COUNT):
+		ant = Ant(world,ant_image)
+		ant.location = Vector2(randint(0,w),randint(0,h))
+		ant.brain.set_state("exploring")
+		world.add_entity(ant)
+
+	while True:
+		for event in pygame.event.get():
+			if event.type == QUIT:
+				return
+
+		time_passed = clock.tick(30)
+
+		if randint(1,10) == 1:
+			leaf = Leaf(world,leaf_image)
+			leaf.location = Vector2(randint(0,w),randint(0,h))
+			world.add_entity(leaf)
+
+		if randint(1,100) == 1:
+			spider = Spider(world,spider_image)
+			spider.location = Vector2(-50,randint(0,h))
+			spider.destination = Vector2(w + 50,randint(0,h))
+			world.add_entity(spider)
+
+		world.process(time_passed)
+		world.render(screen)
+		pygame.display.update()
+
+
+if __name__ == "__main__":
+	run()
 
